@@ -15,7 +15,13 @@ export function applyJsonTransform(schema: Schema): void {
     transform(_doc, ret: Record<string, unknown>) {
       ret.id = ret._id;
       delete ret._id;
+
+      // Server-side bookkeeping that no client has a use for. `passwordHash`
+      // is already `select: false`, but a query that explicitly asks for it
+      // (the login path does) would otherwise carry it into the response.
       delete ret.passwordHash;
+      delete ret.tokenVersion;
+
       return ret;
     },
   });

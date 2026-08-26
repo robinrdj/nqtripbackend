@@ -13,7 +13,8 @@
     "test": "cross-env NODE_ENV=test vitest run",
     "test:watch": "vitest",
     "seed": "tsx src/seed/seed.ts",
-    "seed:fresh": "tsx src/seed/seed.ts --fresh"
+    "seed:fresh": "tsx src/seed/seed.ts --fresh",
+    "dev:memory": "tsx watch src/dev-server.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

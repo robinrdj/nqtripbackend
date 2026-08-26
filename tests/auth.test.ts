@@ -28,6 +28,8 @@ describe("POST /api/v1/auth/register", () => {
 
     expect(response.body.user.passwordHash).toBeUndefined();
     expect(JSON.stringify(response.body)).not.toContain("$2");
+    // Internal bookkeeping, of no use to a client.
+    expect(response.body.user.tokenVersion).toBeUndefined();
   });
 
   it("sets httpOnly auth cookies", async () => {
