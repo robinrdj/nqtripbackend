@@ -10,13 +10,14 @@
 services:
   - type: web
     name: qtrip-api
-    runtime: node
+    # Docker, not node: a Dockerfile in the repo root is what Render actually
+    # builds, and declaring `runtime: node` here only creates a mismatch — the
+    # buildCommand and startCommand would be silently ignored.
+    runtime: docker
+    dockerfilePath: ./Dockerfile
     plan: free
     region: singapore
     branch: master
-
-    buildCommand: npm ci && npm run build
-    startCommand: node dist/index.js
 
     # Render restarts the instance if this stops answering. It reports database
     # connectivity, so a running process with a dead connection is caught.
@@ -36,6 +37,14 @@ services:
         sync: false
 
       # Generated per environment rather than committed.
+      #
+      # `generateValue` only takes effect when the service is created from this
+      # blueprint (New -> Blueprint). A service created any other way — including
+      # letting Render auto-detect the Dockerfile — ignores this file entirely,
+      # and the server then exits at boot complaining these are undefined. If
+      # that happens, add them by hand under Environment; any long random string
+      # will do:
+      #   node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
       - key: JWT_ACCESS_SECRET
         generateValue: true
       - key: JWT_REFRESH_SECRET
