@@ -131,6 +131,48 @@ One deliberate difference: `GET /reservations` used to return every booking in
 the system to anyone who asked. It now returns only the unowned rows from the
 original seed data, so the legacy page renders without exposing real customers.
 
+## Running in Docker
+
+```bash
+docker compose up --build
+```
+
+Starts MongoDB and the API, and runs the seed once against it. The API is then
+on http://localhost:8082, with docs at `/api/docs`.
+
+The image is a two-stage build: TypeScript is compiled with the dev
+dependencies available, then only the runtime dependencies are installed into
+the final image, which runs as the unprivileged `node` user. Its healthcheck
+hits `/health`, so a container whose database connection has died is reported
+unhealthy rather than merely alive.
+
+## Deploying
+
+`render.yaml` is a Render blueprint: build and start commands, a health check on
+`/health`, generated JWT secrets, and prompts for the two values that cannot be
+committed.
+
+| Variable | Notes |
+| --- | --- |
+| `MONGODB_URI` | Atlas SRV string, with the database name in the path |
+| `CORS_ORIGINS` | The frontend's exact origin. Credentialed CORS cannot use a wildcard |
+| `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET` | Generated per environment |
+
+Run `npm run seed` once against the new database to populate it. The seed is
+idempotent, so re-running it is safe.
+
+Cookies are `SameSite=None; Secure` in production, which browsers only accept
+over HTTPS. If the frontend proxies `/api` to this service — as the Netlify
+config does — the cookies are first-party and that pairing never comes up.
+
+## CI
+
+`.github/workflows/ci.yml` runs typecheck, the test suite and a build on every
+push, caching the mongod binary that mongodb-memory-server downloads. A second
+job runs the seed twice against a real MongoDB service container and asserts it
+is idempotent — the migration is what populates a fresh deploy, so it should
+fail in CI rather than against a live database.
+
 ## Testing
 
 ```bash

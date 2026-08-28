@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  # Lets the workflow be run by hand from the Actions tab.
+  workflow_dispatch:
+
+# A new push to the same branch makes the previous run irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Typecheck, test, build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # mongodb-memory-server downloads a mongod binary on first use. Caching it
+      # keeps every run after the first from re-fetching ~100MB.
+      - name: Cache mongodb-memory-server binaries
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/mongodb-binaries
+          key: mongodb-binaries-${{ runner.os }}
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  seed-check:
+    name: Seed migrates cleanly
+    runs-on: ubuntu-latest
+
+    # The seed is what populates a fresh deploy, so a broken migration should
+    # fail here rather than against a real database.
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1})'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Seed a fresh database
+        run: npm run seed:fresh
+        env:
+          MONGODB_URI: mongodb://127.0.0.1:27017/qtrip
+          JWT_ACCESS_SECRET: ci-access-secret-that-is-long-enough
+          JWT_REFRESH_SECRET: ci-refresh-secret-that-is-long-enough
+
+      - name: Seed again, to prove it is idempotent
+        run: npm run seed
+        env:
+          MONGODB_URI: mongodb://127.0.0.1:27017/qtrip
+          JWT_ACCESS_SECRET: ci-access-secret-that-is-long-enough
+          JWT_REFRESH_SECRET: ci-refresh-secret-that-is-long-enough

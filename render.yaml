@@ -1,0 +1,47 @@
+# Render blueprint for the QTrip API.
+#
+# Import it from the Render dashboard (New -> Blueprint) and point it at this
+# repo. The two secrets marked `sync: false` are prompted for on first deploy
+# and never stored here.
+#
+# The free tier spins the instance down when idle, so the first request after a
+# quiet period takes a few seconds. That is a plan limit, not a cold-start bug.
+
+services:
+  - type: web
+    name: qtrip-api
+    runtime: node
+    plan: free
+    region: singapore
+    branch: master
+
+    buildCommand: npm ci && npm run build
+    startCommand: node dist/index.js
+
+    # Render restarts the instance if this stops answering. It reports database
+    # connectivity, so a running process with a dead connection is caught.
+    healthCheckPath: /health
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      # Render injects PORT; the app already prefers it over the default.
+      - key: PORT
+        value: 8082
+
+      # Set on first deploy. Use the SRV string from Atlas, with the database
+      # name in the path: .../qtrip?retryWrites=true&w=majority
+      - key: MONGODB_URI
+        sync: false
+
+      # Generated per environment rather than committed.
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+
+      # Must list the deployed frontend's exact origin. Credentialed CORS
+      # cannot use a wildcard, and the auth cookies are credentialed.
+      - key: CORS_ORIGINS
+        sync: false
