@@ -32,7 +32,24 @@ export function createApp(): Express {
         if (!origin || env.CORS_ORIGINS.includes(origin)) {
           return callback(null, true);
         }
-        callback(new Error(`Origin ${origin} is not allowed by CORS`));
+
+        /*
+          An origin that is not allowed gets a normal response without CORS
+          headers — it does not get an error.
+
+          Passing an Error here instead rejects the whole request, and since
+          it is not an AppError the handler reports it as a 500 "Something
+          went wrong on our end." That is wrong twice over: a policy decision
+          is not a server fault, and it breaks requests that never needed CORS
+          at all. A frontend proxying /api through its own domain is
+          same-origin to the browser but still forwards the original Origin
+          header, so it was being turned away with an opaque 500.
+
+          Withholding the headers is the correct enforcement: a genuine
+          cross-origin read is still blocked by the browser, which is the
+          point, while everything else is served normally.
+        */
+        callback(null, false);
       },
       credentials: true,
     })
