@@ -1,5 +1,6 @@
 import { Schema, model, type InferSchemaType } from "mongoose";
 import { applyJsonTransform } from "./plugins.js";
+import { locationSchema } from "./location.js";
 
 export const ADVENTURE_CATEGORIES = [
   "Beaches",
@@ -32,6 +33,21 @@ const adventureSchema = new Schema(
 
     image: { type: String, required: true },
     images: { type: [String], default: [] },
+    // Attribution for `images`, in the same order. The seeded photos come from
+    // Wikimedia Commons, and most of their licences require crediting the author.
+    photoCredits: {
+      type: [
+        new Schema(
+          {
+            author: { type: String, required: true },
+            license: { type: String, required: true },
+            source: { type: String, required: true },
+          },
+          { _id: false }
+        ),
+      ],
+      default: [],
+    },
 
     category: { type: String, required: true, enum: ADVENTURE_CATEGORIES },
     duration: { type: Number, required: true, min: 0 },
@@ -47,6 +63,10 @@ const adventureSchema = new Schema(
     // without a per-card aggregation.
     ratingAverage: { type: Number, default: 0, min: 0, max: 5 },
     ratingCount: { type: Number, default: 0, min: 0 },
+
+    // Optional so documents written before the map existed still validate;
+    // the seed backfills it.
+    location: { type: locationSchema, required: false },
   },
   { timestamps: true, _id: false }
 );

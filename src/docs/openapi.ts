@@ -45,6 +45,9 @@ export const openApiDocument = {
     { name: "Reservations", description: "Bookings owned by the signed-in user" },
     { name: "Reviews", description: "Ratings, gated on having booked" },
     { name: "Wishlist", description: "Saved adventures" },
+    { name: "Tickets", description: "PDF tickets and QR verification" },
+    { name: "Live", description: "Server-Sent Events for seat availability" },
+    { name: "Weather", description: "Daily forecasts for a trip's city and date" },
   ],
   components: {
     securitySchemes: {
@@ -91,29 +94,52 @@ export const openApiDocument = {
       City: {
         type: "object",
         properties: {
-          id: { type: "string", example: "bengaluru" },
-          city: { type: "string", example: "Bengaluru" },
-          description: { type: "string", example: "100+ Places" },
+          id: { type: "string", example: "manali" },
+          city: { type: "string", example: "Manali" },
+          description: { type: "string", example: "Himalayan treks, waterfalls and mountain roads" },
           image: { type: "string", format: "uri" },
-          adventureCount: { type: "integer", example: 12 },
+          photoCredit: { $ref: "#/components/schemas/PhotoCredit" },
+          country: { type: "string", example: "India" },
+          adventureCount: { type: "integer", example: 8 },
+          location: { $ref: "#/components/schemas/Location" },
+        },
+      },
+      Location: {
+        type: "object",
+        properties: {
+          lat: { type: "number", example: 32.24844 },
+          lng: { type: "number", example: 77.18084 },
+        },
+      },
+      PhotoCredit: {
+        type: "object",
+        properties: {
+          author: { type: "string" },
+          license: { type: "string", example: "CC BY-SA 4.0" },
+          source: { type: "string", format: "uri", description: "Wikimedia Commons file page" },
         },
       },
       Adventure: {
         type: "object",
         properties: {
           id: { type: "string", example: "2447910730" },
-          city: { type: "string", example: "bengaluru" },
-          name: { type: "string", example: "Niaboytown" },
+          city: { type: "string", example: "manali" },
+          name: { type: "string", example: "Old Manali Café Night" },
           subtitle: { type: "string" },
           content: { type: "string" },
           image: { type: "string", format: "uri" },
           images: { type: "array", items: { type: "string", format: "uri" } },
+          photoCredits: {
+            type: "array",
+            description: "Attribution for each entry in images, in the same order",
+            items: { $ref: "#/components/schemas/PhotoCredit" },
+          },
           category: {
             type: "string",
             enum: ["Beaches", "Cycling", "Hillside", "Party"],
           },
           duration: { type: "integer", description: "Hours", example: 6 },
-          costPerHead: { type: "integer", example: 4003 },
+          costPerHead: { type: "integer", example: 1800 },
           currency: { type: "string", example: "INR" },
           capacity: { type: "integer", example: 20 },
           booked: { type: "integer", example: 3 },
@@ -121,6 +147,10 @@ export const openApiDocument = {
           available: { type: "boolean", description: "Legacy alias for seatsLeft > 0" },
           ratingAverage: { type: "number", example: 4.5 },
           ratingCount: { type: "integer", example: 12 },
+          location: {
+            $ref: "#/components/schemas/Location",
+            description: "Where the adventure starts: trailhead, beach, venue or meeting point",
+          },
         },
       },
       Reservation: {
@@ -352,7 +382,7 @@ export const openApiDocument = {
             in: "path",
             required: true,
             schema: { type: "string" },
-            example: "bengaluru",
+            example: "manali",
           },
         ],
         responses: {
@@ -370,7 +400,7 @@ export const openApiDocument = {
           "counts computed without the category filter applied, so the UI can " +
           "show how many results each unticked option would add.",
         parameters: [
-          { name: "city", in: "query", schema: { type: "string" }, example: "bengaluru" },
+          { name: "city", in: "query", schema: { type: "string" }, example: "manali" },
           {
             name: "q",
             in: "query",
@@ -622,6 +652,164 @@ export const openApiDocument = {
             },
           },
           401: { $ref: "#/components/responses/Unauthorized" },
+          404: { $ref: "#/components/responses/NotFound" },
+        },
+      },
+    },
+    "/auth/providers": {
+      get: {
+        tags: ["Auth"],
+        summary: "Which sign-in methods are enabled",
+        responses: {
+          200: {
+            description: "Password is always on; Google when GOOGLE_CLIENT_ID is set",
+            content: {
+              "application/json": {
+                example: {
+                  password: true,
+                  google: { enabled: true, clientId: "123-abc.apps.googleusercontent.com" },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    "/auth/google": {
+      post: {
+        tags: ["Auth"],
+        summary: "Sign in with a Google ID token",
+        description:
+          "Takes the `credential` from Google Identity Services. Creates the " +
+          "account on first use, or links an existing one with the same " +
+          "verified email. Sets the same cookies as password sign-in.",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["credential"],
+                properties: { credential: { type: "string" } },
+              },
+            },
+          },
+        },
+        responses: {
+          200: { description: "Signed in" },
+          401: { $ref: "#/components/responses/Unauthorized" },
+          404: { description: "Google sign-in is not enabled on this server" },
+        },
+      },
+    },
+    "/reservations/{id}/ticket": {
+      get: {
+        tags: ["Tickets"],
+        summary: "Download the ticket for one of your bookings",
+        security: bearerAuth,
+        parameters: [
+          { name: "id", in: "path", required: true, schema: { type: "string" } },
+        ],
+        responses: {
+          200: {
+            description: "A PDF ticket with a signed QR code",
+            content: { "application/pdf": { schema: { type: "string", format: "binary" } } },
+          },
+          401: { $ref: "#/components/responses/Unauthorized" },
+          403: { $ref: "#/components/responses/Forbidden" },
+          404: { $ref: "#/components/responses/NotFound" },
+          409: { $ref: "#/components/responses/Conflict" },
+        },
+      },
+    },
+    "/tickets/{id}/verify": {
+      get: {
+        tags: ["Tickets"],
+        summary: "Check a scanned ticket",
+        description:
+          "Public. The `sig` from the QR code authorises the lookup; a wrong " +
+          "signature and an unknown id get the same `{ valid: false }`.",
+        parameters: [
+          { name: "id", in: "path", required: true, schema: { type: "string" } },
+          { name: "sig", in: "query", required: true, schema: { type: "string" } },
+        ],
+        responses: {
+          200: {
+            description: "Verdict",
+            content: {
+              "application/json": {
+                example: {
+                  valid: true,
+                  reference: "QT-3F9A21C4",
+                  status: "confirmed",
+                  adventureName: "Old Manali Café Night",
+                  city: "manali",
+                  date: "2026-12-01",
+                  persons: 2,
+                  guest: "Robin R.",
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    "/adventures/{id}/live": {
+      get: {
+        tags: ["Live"],
+        summary: "Stream seat availability and viewer counts",
+        description:
+          "A `text/event-stream`. Emits `seats` ({ adventureId, capacity, " +
+          "booked, seatsLeft }) on connect and after every booking or " +
+          "cancellation, and `viewers` ({ adventureId, count }) as people " +
+          "open and close the page. Swagger UI cannot display a stream; try " +
+          "`curl -N` instead.",
+        parameters: [
+          { name: "id", in: "path", required: true, schema: { type: "string" } },
+        ],
+        responses: {
+          200: { description: "Event stream", content: { "text/event-stream": {} } },
+          404: { $ref: "#/components/responses/NotFound" },
+        },
+      },
+    },
+    "/weather": {
+      get: {
+        tags: ["Weather"],
+        summary: "Daily forecast for a city on a date",
+        description:
+          "Backed by Open-Meteo, cached per city for an hour. Covers the next " +
+          "16 days; outside that, or if the upstream is down, answers " +
+          "`available: false` with a reason rather than an error.",
+        parameters: [
+          { name: "city", in: "query", required: true, schema: { type: "string" }, example: "goa" },
+          {
+            name: "date",
+            in: "query",
+            required: true,
+            schema: { type: "string", format: "date" },
+          },
+        ],
+        responses: {
+          200: {
+            description: "Forecast, or why there is none",
+            content: {
+              "application/json": {
+                example: {
+                  forecast: {
+                    available: true,
+                    date: "2026-10-02",
+                    condition: "rain",
+                    summary: "Rain showers",
+                    tempMax: 31,
+                    tempMin: 24,
+                    precipitationChance: 70,
+                  },
+                },
+              },
+            },
+          },
+          400: { $ref: "#/components/responses/BadRequest" },
           404: { $ref: "#/components/responses/NotFound" },
         },
       },

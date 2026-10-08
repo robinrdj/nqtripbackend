@@ -40,3 +40,8 @@ export const changePasswordSchema = z.object({
 
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
+
+export const googleLoginSchema = z.object({
+  // A Google ID token is a JWT of a kilobyte or so; the cap only stops abuse.
+  credential: z.string().min(1, "Missing Google credential.").max(4096),
+});

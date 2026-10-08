@@ -8,6 +8,7 @@ import { requireAuth } from "../middleware/auth.js";
 import { writeLimiter } from "../middleware/rateLimit.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import * as reservationService from "../services/reservationService.js";
+import * as ticketService from "../services/ticketService.js";
 import { pathParam } from "../utils/params.js";
 
 const router = Router();
@@ -42,6 +43,22 @@ router.post(
       req.user!.id
     );
     res.status(201).json({ reservation });
+  })
+);
+
+router.get(
+  "/:id/ticket",
+  asyncHandler(async (req, res) => {
+    const { filename, pdf } = await ticketService.ticketForUser(
+      pathParam(req, "id"),
+      req.user!.id
+    );
+    res
+      .type("application/pdf")
+      .set("Content-Disposition", `attachment; filename="${filename}"`)
+      // A ticket names a person; keep it out of shared caches.
+      .set("Cache-Control", "private, no-store")
+      .send(pdf);
   })
 );
 

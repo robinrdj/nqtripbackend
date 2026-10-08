@@ -1,18 +1,24 @@
 import rateLimit from "express-rate-limit";
-import { isTest } from "../config/env.js";
+import { env, isProduction, isTest } from "../config/env.js";
 
 /**
  * Limits are disabled under test — otherwise a suite that exercises the login
  * route a dozen times starts failing on the thirteenth assertion for reasons
  * that have nothing to do with the code under test.
+ *
+ * DISABLE_RATE_LIMIT does the same for the browser suite, which drives a dev
+ * server from one IP far harder than any person would. It is ignored in
+ * production, so a stray copy of the variable cannot open a deployed API up.
  */
+const limitsOff = isTest || (env.DISABLE_RATE_LIMIT && !isProduction);
+
 function limiter(options: { windowMs: number; max: number; message: string }) {
   return rateLimit({
     windowMs: options.windowMs,
-    max: isTest ? 0 : options.max,
+    max: limitsOff ? 0 : options.max,
     standardHeaders: true,
     legacyHeaders: false,
-    skip: () => isTest,
+    skip: () => limitsOff,
     message: {
       error: { code: "RATE_LIMITED", message: options.message },
       message: options.message,

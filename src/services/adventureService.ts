@@ -124,8 +124,10 @@ export interface CitySummary {
   city: string;
   description: string;
   image: string;
+  photoCredit?: { author: string; license: string; source: string };
   country?: string;
   adventureCount: number;
+  location?: { lat: number; lng: number };
 }
 
 export async function listCities(): Promise<CitySummary[]> {
@@ -146,8 +148,12 @@ function toCitySummary(doc: Record<string, unknown>): CitySummary {
     city: String(doc.city),
     description: String(doc.description),
     image: String(doc.image),
+    ...(doc.photoCredit
+      ? { photoCredit: doc.photoCredit as CitySummary["photoCredit"] }
+      : {}),
     ...(doc.country ? { country: String(doc.country) } : {}),
     adventureCount: Number(doc.adventureCount ?? 0),
+    ...(doc.location ? { location: doc.location as { lat: number; lng: number } } : {}),
   };
 }
 

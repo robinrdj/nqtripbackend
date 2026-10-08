@@ -3,6 +3,11 @@ import { Adventure } from "../models/Adventure.js";
 import { Reservation } from "../models/Reservation.js";
 import { AppError } from "../utils/AppError.js";
 import type { CreateReservationInput } from "../schemas/reservations.js";
+import { publishSeats } from "./liveEvents.js";
+import {
+  queueBookingCancellation,
+  queueBookingConfirmation,
+} from "./notificationService.js";
 
 /**
  * Books seats.
@@ -47,8 +52,9 @@ export async function createReservation(
     );
   }
 
+  let reservation;
   try {
-    const reservation = await Reservation.create({
+    reservation = await Reservation.create({
       user: userId ? new Types.ObjectId(userId) : undefined,
       adventure: claimed._id,
       adventureName: claimed.name,
@@ -62,8 +68,6 @@ export async function createReservation(
       persons: input.persons,
       price: input.persons * claimed.costPerHead,
     });
-
-    return reservation.toJSON();
   } catch (err) {
     await Adventure.updateOne(
       { _id: claimed._id },
@@ -71,6 +75,13 @@ export async function createReservation(
     );
     throw err;
   }
+
+  // Side effects of a booking that has already succeeded. Deliberately outside
+  // the try above: neither may roll back the seats, and neither is awaited.
+  void publishSeats(claimed._id);
+  if (userId) queueBookingConfirmation(reservation.id);
+
+  return reservation.toJSON();
 }
 
 /** Frees the seats and marks the row cancelled; only the owner may do this. */
@@ -95,6 +106,9 @@ export async function cancelReservation(reservationId: string, userId: string) {
     { _id: reservation.adventure },
     { $inc: { booked: -reservation.persons } }
   );
+
+  void publishSeats(reservation.adventure);
+  queueBookingCancellation(reservation.id);
 
   return reservation.toJSON();
 }

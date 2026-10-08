@@ -29,3 +29,6 @@ yarn-error.log*
 
 # build output
 dist
+
+# Emails written locally when SMTP_URL is not set
+.mail-outbox

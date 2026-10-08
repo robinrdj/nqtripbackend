@@ -66,7 +66,7 @@ tests/                Supertest suites against mongodb-memory-server
 ## Data model notes
 
 **Identifiers carry over from the old JSON file.** Cities use their slug as
-`_id` (`bengaluru`), adventures keep their legacy numeric id (`2447910730`). So
+`_id` (`goa`), adventures keep their legacy numeric id (`2447910730`). So
 existing bookmarks and the deployed frontend keep resolving, and the migration
 is idempotent — re-running the seed updates rows rather than duplicating them.
 

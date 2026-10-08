@@ -1,6 +1,8 @@
 import { createApp } from "./app.js";
 import { env } from "./config/env.js";
 import { connectToDatabase, disconnectFromDatabase } from "./db/connect.js";
+import { endAllStreams } from "./services/liveEvents.js";
+import { settleMail } from "./services/mailer.js";
 
 async function main(): Promise<void> {
   // Connect before listening, so the process never accepts a request it cannot
@@ -18,9 +20,13 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string) => {
     console.log(`\n[api] ${signal} received, shutting down`);
     server.close(async () => {
+      // Emails queued by the last few bookings still need the database.
+      await settleMail();
       await disconnectFromDatabase();
       process.exit(0);
     });
+    // Live streams never end by themselves, so close() would wait on them.
+    endAllStreams();
     // Do not let a hung connection hold the process open forever.
     setTimeout(() => process.exit(1), 10_000).unref();
   };

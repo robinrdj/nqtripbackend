@@ -21,6 +21,7 @@ export function applyJsonTransform(schema: Schema): void {
       // (the login path does) would otherwise carry it into the response.
       delete ret.passwordHash;
       delete ret.tokenVersion;
+      delete ret.googleId;
 
       return ret;
     },

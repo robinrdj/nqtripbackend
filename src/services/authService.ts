@@ -1,5 +1,7 @@
+import { env } from "../config/env.js";
 import { User, hashPassword } from "../models/User.js";
 import { AppError } from "../utils/AppError.js";
+import { verifyGoogleCredential, type GoogleProfile } from "../utils/googleIdentity.js";
 import {
   signAccessToken,
   signRefreshToken,
@@ -57,7 +59,10 @@ export async function login(input: LoginInput): Promise<AuthResult> {
   // distinguishing them turns the login form into an account-enumeration oracle.
   const invalid = AppError.unauthorized("That email or password is not right.");
 
-  if (!user) {
+  // A Google-only account has no password to compare against, and gets the
+  // same answer as an unknown one - telling them apart would reveal that the
+  // address is registered.
+  if (!user || !user.passwordHash) {
     // Still spend the time a real comparison would, so response timing does not
     // reveal whether the address is registered.
     await hashPassword(input.password);
@@ -139,6 +144,12 @@ export async function changePassword(
   const user = await User.findById(userId).select("+passwordHash");
   if (!user) throw AppError.notFound("We could not find your account.");
 
+  if (!user.passwordHash) {
+    throw AppError.badRequest(
+      "This account signs in with Google, so it has no password to change."
+    );
+  }
+
   const ok = await (
     user as unknown as { verifyPassword(p: string): Promise<boolean> }
   ).verifyPassword(currentPassword);
@@ -155,4 +166,71 @@ export async function changePassword(
     role: user.role as "user" | "admin",
     tokenVersion: user.tokenVersion,
   });
+}
+
+/** What the sign-in page can offer. The Google client id is public by design. */
+export function authProviders() {
+  return {
+    password: true,
+    google: env.GOOGLE_CLIENT_ID
+      ? { enabled: true as const, clientId: env.GOOGLE_CLIENT_ID }
+      : { enabled: false as const },
+  };
+}
+
+/**
+ * Signs in with a Google ID token, creating or linking the account as needed.
+ *
+ * Matching order:
+ * 1. An account already linked to this Google id - the normal returning case.
+ * 2. An account with the same email - linked, but only when Google says it
+ *    has verified that address. Linking on an unverified email would let
+ *    someone who registers the victim's address at Google take over the
+ *    victim's QTrip account.
+ * 3. Otherwise, a new account with no password.
+ */
+export async function loginWithGoogle(credential: string): Promise<AuthResult> {
+  if (!env.GOOGLE_CLIENT_ID) {
+    throw new AppError(404, "Google sign-in is not enabled on this server.", "NOT_ENABLED");
+  }
+
+  let profile: GoogleProfile;
+  try {
+    profile = await verifyGoogleCredential(credential);
+  } catch {
+    throw AppError.unauthorized("We could not verify your Google sign-in. Please try again.");
+  }
+
+  if (!profile.emailVerified) {
+    throw AppError.unauthorized(
+      "Your Google account's email is not verified, so we cannot sign you in with it."
+    );
+  }
+
+  let user = await User.findOne({ googleId: profile.sub });
+
+  if (!user) {
+    user = await User.findOne({ email: profile.email });
+    if (user) {
+      user.googleId = profile.sub;
+      if (!user.avatarUrl && profile.picture) user.avatarUrl = profile.picture;
+      await user.save();
+    }
+  }
+
+  user ??= await User.create({
+    name: profile.name.slice(0, 80),
+    email: profile.email,
+    googleId: profile.sub,
+    ...(profile.picture ? { avatarUrl: profile.picture } : {}),
+  });
+
+  return {
+    user: user.toJSON(),
+    tokens: issueTokens({
+      id: user.id,
+      role: user.role as "user" | "admin",
+      tokenVersion: user.tokenVersion,
+    }),
+  };
 }

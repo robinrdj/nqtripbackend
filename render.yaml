@@ -54,3 +54,19 @@ services:
       # cannot use a wildcard, and the auth cookies are credentialed.
       - key: CORS_ORIGINS
         sync: false
+
+      # The deployed frontend's URL. Links in emails and ticket QR codes point
+      # here, so it must be the address customers open.
+      - key: PUBLIC_APP_URL
+        sync: false
+
+      # Optional. Without SMTP_URL, bookings still work but no email is sent.
+      # Any SMTP provider: smtps://user:pass@host:465
+      - key: SMTP_URL
+        sync: false
+      - key: MAIL_FROM
+        value: QTrip <no-reply@qtrip.dev>
+
+      # Optional. Enables "Sign in with Google" when set.
+      - key: GOOGLE_CLIENT_ID
+        sync: false

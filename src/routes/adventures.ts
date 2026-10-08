@@ -11,6 +11,8 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import * as adventureService from "../services/adventureService.js";
 import * as reviewService from "../services/reviewService.js";
 import * as wishlistService from "../services/wishlistService.js";
+import * as liveEvents from "../services/liveEvents.js";
+import { AppError } from "../utils/AppError.js";
 import { pathParam } from "../utils/params.js";
 import type { ListAdventuresQuery } from "../schemas/adventures.js";
 
@@ -42,6 +44,61 @@ router.get(
       ? (await wishlistService.wishlistIds(req.user.id)).includes(pathParam(req, "id"))
       : false;
     res.json({ adventure, saved });
+  })
+);
+
+/**
+ * Server-Sent Events: seat counts and "people viewing", pushed as they change.
+ *
+ * SSE rather than WebSockets because the traffic is one-way, it rides plain
+ * HTTP through every proxy (Vite's, Netlify's), carries the auth cookie like
+ * any request, and the browser's EventSource reconnects on its own.
+ */
+router.get(
+  "/:id/live",
+  validate({ params: adventureIdParamSchema }),
+  asyncHandler(async (req, res) => {
+    const id = pathParam(req, "id");
+
+    // Checked before the stream opens, while a normal error response is still
+    // possible. Once the headers are out, errors can only end the stream.
+    const snapshot = await liveEvents.seatSnapshot(id);
+    if (!snapshot) {
+      throw AppError.notFound(`We could not find an adventure with id "${id}".`);
+    }
+    if (!liveEvents.canOpenStream()) {
+      throw new AppError(503, "Live updates are busy right now.", "UNAVAILABLE");
+    }
+
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      // no-transform stops proxies compressing the stream, which would buffer it.
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      // Tells nginx-style proxies not to buffer, or events arrive in batches.
+      "X-Accel-Buffering": "no",
+    });
+
+    const send = (event: string, data: unknown) => {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+
+    // How long the browser waits before reconnecting after a drop.
+    res.write("retry: 5000\n\n");
+    send("seats", snapshot);
+
+    const unsubscribe = liveEvents.subscribe(id, (event) => send(event.type, event.data));
+
+    // A comment line every 25s keeps idle proxies from closing the connection.
+    const heartbeat = setInterval(() => res.write(": ping\n\n"), 25_000);
+
+    const untrack = liveEvents.trackStream(() => res.end());
+
+    req.on("close", () => {
+      clearInterval(heartbeat);
+      unsubscribe();
+      untrack();
+    });
   })
 );
 

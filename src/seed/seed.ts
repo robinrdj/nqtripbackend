@@ -1,56 +1,39 @@
 /**
- * Migrates the original lowdb `db.json` into MongoDB.
+ * Seeds MongoDB with the app's destinations and adventures, plus the demo
+ * accounts and the reservations migrated from the original lowdb `db.json`.
  *
  * Run with: npm run seed        (adds anything missing, leaves the rest alone)
  *           npm run seed:fresh  (drops the collections first)
  *
- * The script is idempotent: identifiers carry over from the JSON file
- * unchanged, so re-running it updates the same documents rather than creating
- * duplicates. That matters because the seed is also what populates a fresh
- * Atlas database on first deploy.
+ * Destinations and adventures come from `catalogue.ts`, with photos from
+ * `photos.ts`. `db.json` still supplies the reservations and each legacy
+ * adventure's booking state, keyed by the ids the catalogue kept.
+ *
+ * The script is idempotent: re-running it updates the same documents rather
+ * than creating duplicates. That matters because the seed is also what
+ * populates a fresh Atlas database on first deploy.
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import mongoose from "mongoose";
 import { connectToDatabase, disconnectFromDatabase } from "../db/connect.js";
-import { Adventure, ADVENTURE_CATEGORIES } from "../models/Adventure.js";
-import type { AdventureCategory } from "../models/Adventure.js";
+import { Adventure } from "../models/Adventure.js";
+import type { AdventureDoc } from "../models/Adventure.js";
 import { City } from "../models/City.js";
 import { Reservation } from "../models/Reservation.js";
 import { Review } from "../models/Review.js";
 import { User, hashPassword } from "../models/User.js";
 import { Wishlist } from "../models/Wishlist.js";
+import { ADVENTURE_CATALOGUE, DESTINATIONS } from "./catalogue.js";
+import { ADVENTURE_PHOTOS, DESTINATION_PHOTOS, type Photo } from "./photos.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const DB_JSON = path.resolve(here, "../../db.json");
 
-interface LegacyCity {
-  id: string;
-  city: string;
-  description: string;
-  image: string;
-}
-
-interface LegacyAdventure {
-  id: string;
-  name: string;
-  costPerHead: number;
-  currency: string;
-  image: string;
-  duration: number;
-  category: string;
-}
-
 interface LegacyDetail {
   id: string;
-  name: string;
-  subtitle: string;
-  images: (string | null)[];
-  content: string;
-  available: boolean;
   reserved: boolean;
-  costPerHead: number;
 }
 
 interface LegacyReservation {
@@ -65,8 +48,6 @@ interface LegacyReservation {
 }
 
 interface LegacyDb {
-  cities: LegacyCity[];
-  adventures: { id: string; adventures: LegacyAdventure[] }[];
   detail: LegacyDetail[];
   reservations: LegacyReservation[];
 }
@@ -74,10 +55,13 @@ interface LegacyDb {
 const FALLBACK_IMAGE =
   "https://images.pexels.com/photos/1271619/pexels-photo-1271619.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750";
 
-function toCategory(value: string): AdventureCategory {
-  return (ADVENTURE_CATEGORIES as readonly string[]).includes(value)
-    ? (value as AdventureCategory)
-    : "Party";
+/** Plain objects are what gets written; the inferred type is the hydrated DocumentArray. */
+function toCredits(photos: Photo[]) {
+  return photos.map(({ author, license, source }) => ({
+    author,
+    license,
+    source,
+  })) as unknown as AdventureDoc["photoCredits"];
 }
 
 export interface SeedOptions {
@@ -112,84 +96,92 @@ export async function seedFromLegacyJson(options: SeedOptions = {}): Promise<voi
     ]);
   }
 
+  const adventures = Object.entries(ADVENTURE_CATALOGUE);
+
   // --- Cities -------------------------------------------------------------
   const adventureCountByCity = new Map<string, number>();
-  for (const group of raw.adventures) {
-    adventureCountByCity.set(group.id, group.adventures.length);
+  for (const [, adventure] of adventures) {
+    adventureCountByCity.set(adventure.city, (adventureCountByCity.get(adventure.city) ?? 0) + 1);
   }
 
   await City.bulkWrite(
-    raw.cities.map((city) => ({
-      updateOne: {
-        filter: { _id: city.id },
-        update: {
-          $set: {
-            city: city.city,
-            description: city.description,
-            image: city.image,
-            adventureCount: adventureCountByCity.get(city.id) ?? 0,
-          },
-        },
-        upsert: true,
-      },
-    }))
-  );
-  log(`[seed] cities: ${raw.cities.length}`);
-
-  // --- Adventures ---------------------------------------------------------
-  // The old data split each adventure across `adventures` (card fields) and
-  // `detail` (prose). Merge them back into one document, keyed by the id both
-  // halves already shared.
-  const detailById = new Map(raw.detail.map((d) => [d.id, d]));
-
-  const adventureOps = [];
-  let orphanedDetails = 0;
-
-  for (const group of raw.adventures) {
-    for (const item of group.adventures) {
-      const detail = detailById.get(item.id);
-      if (!detail) orphanedDetails += 1;
-
-      // Some seed rows contain nulls in the image array.
-      const images = (detail?.images ?? [])
-        .filter((img): img is string => typeof img === "string" && img !== "")
-        .slice(0, 6);
-
-      const capacity = 10 + ((hashString(item.id) % 5) * 5); // 10..30, stable
-      // Carry the old boolean forward as a plausible starting occupancy rather
-      // than discarding it: previously "reserved" adventures start part-booked.
-      const booked = detail?.reserved ? Math.min(capacity, 1 + (hashString(item.id) % 4)) : 0;
-
-      adventureOps.push({
+    DESTINATIONS.map((destination) => {
+      const photo = DESTINATION_PHOTOS[destination.id];
+      return {
         updateOne: {
-          filter: { _id: item.id },
+          filter: { _id: destination.id },
           update: {
             $set: {
-              city: group.id,
-              name: item.name,
-              subtitle: detail?.subtitle ?? "",
-              content: detail?.content ?? "",
-              image: item.image || images[0] || FALLBACK_IMAGE,
-              images: images.length > 0 ? images : [item.image || FALLBACK_IMAGE],
-              category: toCategory(item.category),
-              duration: item.duration,
-              costPerHead: item.costPerHead,
-              currency: item.currency || "INR",
-              capacity,
+              city: destination.city,
+              country: destination.country,
+              description: destination.description,
+              location: destination.location,
+              adventureCount: adventureCountByCity.get(destination.id) ?? 0,
+              ...(photo
+                ? {
+                    image: photo.url,
+                    photoCredit: {
+                      author: photo.author,
+                      license: photo.license,
+                      source: photo.source,
+                    },
+                  }
+                : {}),
             },
-            $setOnInsert: { booked },
           },
           upsert: true,
         },
-      });
-    }
-  }
+      };
+    })
+  );
+
+  // Destinations dropped from the catalogue (the original Bengaluru, Kolkata,
+  // Malaysia, Bangkok, New York and Paris) would otherwise linger with no
+  // adventures, since every adventure id now points at a current destination.
+  const removed = await City.deleteMany({ _id: { $nin: DESTINATIONS.map((d) => d.id) } });
+  log(
+    `[seed] cities: ${DESTINATIONS.length}` +
+      (removed.deletedCount > 0 ? ` (removed ${removed.deletedCount} retired)` : "")
+  );
+
+  // --- Adventures ---------------------------------------------------------
+  const reservedById = new Map(raw.detail.map((d) => [d.id, d.reserved]));
+
+  const adventureOps = adventures.map(([id, adventure]) => {
+    const capacity = 10 + ((hashString(id) % 5) * 5); // 10..30, stable
+    // Carry the old boolean forward as a plausible starting occupancy rather
+    // than discarding it: previously "reserved" adventures start part-booked.
+    const booked = reservedById.get(id) ? Math.min(capacity, 1 + (hashString(id) % 4)) : 0;
+    const photos = ADVENTURE_PHOTOS[id] ?? [];
+
+    return {
+      updateOne: {
+        filter: { _id: id },
+        update: {
+          $set: {
+            city: adventure.city,
+            name: adventure.name,
+            subtitle: adventure.subtitle,
+            content: adventure.content,
+            image: photos[0]?.url ?? FALLBACK_IMAGE,
+            images: photos.length > 0 ? photos.map((p) => p.url) : [FALLBACK_IMAGE],
+            photoCredits: toCredits(photos),
+            category: adventure.category,
+            duration: adventure.duration,
+            costPerHead: adventure.costPerHead,
+            currency: "INR",
+            capacity,
+            location: adventure.location,
+          },
+          $setOnInsert: { booked },
+        },
+        upsert: true,
+      },
+    };
+  });
 
   await Adventure.bulkWrite(adventureOps);
-  log(
-    `[seed] adventures: ${adventureOps.length}` +
-      (orphanedDetails > 0 ? ` (${orphanedDetails} had no detail record)` : "")
-  );
+  log(`[seed] adventures: ${adventureOps.length}`);
 
   // --- Demo accounts ------------------------------------------------------
   // A recruiter should be able to sign in and click around without registering.
@@ -230,7 +222,7 @@ export async function seedFromLegacyJson(options: SeedOptions = {}): Promise<voi
       update: {
         $set: {
           adventure: r.adventure,
-          adventureName: r.adventureName,
+          adventureName: ADVENTURE_CATALOGUE[r.adventure]?.name ?? r.adventureName,
           name: r.name,
           date: new Date(`${r.date}T00:00:00.000Z`),
           persons: Math.max(1, Number.parseInt(r.person, 10) || 1),

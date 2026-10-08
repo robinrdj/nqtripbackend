@@ -15,9 +15,24 @@ const userSchema = new Schema(
     },
     // `select: false` so a stray `User.find()` cannot leak hashes into a
     // response; the login path opts back in explicitly.
-    passwordHash: { type: String, required: true, select: false },
+    //
+    // Required unless the account signs in with Google: those accounts may
+    // never have had a password, and inventing one would create a credential
+    // nobody knows but which still works.
+    passwordHash: {
+      type: String,
+      select: false,
+      required(this: { googleId?: string }) {
+        return !this.googleId;
+      },
+    },
     role: { type: String, enum: ["user", "admin"], default: "user" },
     avatarUrl: { type: String },
+
+    // Google's stable account id (the ID token's `sub`). The email can change
+    // on Google's side; this cannot. Sparse so password-only accounts, which
+    // have none, do not collide on the unique index.
+    googleId: { type: String, unique: true, sparse: true },
 
     // Bumped on password change and logout-everywhere, so refresh tokens issued
     // before that moment stop validating.

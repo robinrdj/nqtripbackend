@@ -37,6 +37,9 @@ async function main(): Promise<void> {
     console.log(`[dev] docs     http://localhost:${env.PORT}/api/docs`);
     console.log(`[dev] sign in  demo@qtrip.dev / Demo1234`);
     console.log("[dev] in-memory database - nothing is persisted");
+    if (!env.SMTP_URL) {
+      console.log("[dev] emails   written to .mail-outbox/ (set SMTP_URL to send)");
+    }
   });
 
   const shutdown = async () => {

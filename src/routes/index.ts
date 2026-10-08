@@ -7,6 +7,9 @@ import { listReviewsQuerySchema } from "../schemas/reviews.js";
 import * as adventureService from "../services/adventureService.js";
 import * as reviewService from "../services/reviewService.js";
 import * as wishlistService from "../services/wishlistService.js";
+import * as weatherService from "../services/weatherService.js";
+import * as ticketService from "../services/ticketService.js";
+import { weatherQuerySchema } from "../schemas/weather.js";
 import authRoutes from "./auth.js";
 import adventureRoutes from "./adventures.js";
 import reservationRoutes from "./reservations.js";
@@ -29,6 +32,28 @@ router.get(
   "/cities/:id",
   asyncHandler(async (req, res) => {
     res.json({ city: await adventureService.getCityById(pathParam(req, "id")) });
+  })
+);
+
+router.get(
+  "/weather",
+  validate({ query: weatherQuerySchema }),
+  asyncHandler(async (req, res) => {
+    const { city, date } = validatedQuery<{ city: string; date: string }>(req);
+    // Forecasts move slowly; let the browser reuse one for a few minutes.
+    res.set("Cache-Control", "public, max-age=600");
+    res.json({ forecast: await weatherService.getForecast(city, date) });
+  })
+);
+
+// Public on purpose: whoever scans a ticket's QR code is not signed in as its
+// owner. The signature in `sig` is what authorises the lookup.
+router.get(
+  "/tickets/:id/verify",
+  asyncHandler(async (req, res) => {
+    const sig = typeof req.query.sig === "string" ? req.query.sig : "";
+    res.set("Cache-Control", "no-store");
+    res.json(await ticketService.verifyTicket(pathParam(req, "id"), sig));
   })
 );
 

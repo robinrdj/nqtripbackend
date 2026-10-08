@@ -1,9 +1,9 @@
 /**
- * Runs the real migration against the real db.json, in memory.
+ * Runs the real seed (catalogue, photos and the legacy db.json) in memory.
  *
  * This is the test that matters before pointing the seed at Atlas: it proves
- * the legacy file actually lands as valid documents, rather than discovering a
- * bad record halfway through writing to the live database.
+ * the data actually lands as valid documents, rather than discovering a bad
+ * record halfway through writing to the live database.
  */
 import { describe, expect, it } from "vitest";
 import request from "supertest";
@@ -13,6 +13,7 @@ import { City } from "../src/models/City.js";
 import { Reservation } from "../src/models/Reservation.js";
 import { User } from "../src/models/User.js";
 import { app } from "./helpers.js";
+import { DESTINATIONS } from "../src/seed/catalogue.js";
 
 async function runSeed() {
   // `connect: false` - the suite already holds an open connection.
@@ -23,7 +24,7 @@ describe("seedFromLegacyJson", () => {
   it("migrates cities, adventures and reservations", async () => {
     await runSeed();
 
-    expect(await City.countDocuments()).toBe(8);
+    expect(await City.countDocuments()).toBe(DESTINATIONS.length);
     expect(await Adventure.countDocuments()).toBeGreaterThan(50);
     expect(await Reservation.countDocuments()).toBe(8);
   });
@@ -31,27 +32,25 @@ describe("seedFromLegacyJson", () => {
   it("keeps the original identifiers, so old URLs still resolve", async () => {
     await runSeed();
 
-    const bengaluru = await City.findById("bengaluru");
-    expect(bengaluru?.city).toBe("Bengaluru");
+    const goa = await City.findById("goa");
+    expect(goa?.city).toBe("Goa");
 
     // A legacy numeric adventure id from db.json.
     const adventure = await Adventure.findById("2447910730");
     expect(adventure).not.toBeNull();
-    expect(adventure?.city).toBe("bengaluru");
+    expect(adventure?.city).toBe("manali");
   });
 
-  it("merges the split list/detail records into one document", async () => {
+  it("writes every field the card and detail views need", async () => {
     await runSeed();
 
     const adventure = await Adventure.findById("2447910730");
-    // `name`, `category` and `duration` came from the list half...
     expect(adventure?.category).toBeTruthy();
     expect(adventure?.duration).toBeGreaterThan(0);
-    // ...and the prose came from the detail half.
     expect(adventure?.content.length).toBeGreaterThan(50);
   });
 
-  it("drops the null entries the seed images arrays contain", async () => {
+  it("gives every adventure a usable image list", async () => {
     await runSeed();
 
     const withNulls = await Adventure.find({ images: null }).lean();
@@ -130,10 +129,10 @@ describe("seedFromLegacyJson", () => {
     await runSeed();
 
     const cities = await request(app()).get("/cities").expect(200);
-    expect(cities.body).toHaveLength(8);
+    expect(cities.body).toHaveLength(DESTINATIONS.length);
 
     const adventures = await request(app())
-      .get("/adventures?city=bengaluru")
+      .get("/adventures?city=manali")
       .expect(200);
     expect(adventures.body.length).toBeGreaterThan(0);
 

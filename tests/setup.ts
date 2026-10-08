@@ -31,6 +31,14 @@ beforeAll(async () => {
 });
 
 afterEach(async () => {
+  // A booking queues its email in the background. Let those jobs finish before
+  // the wipe, or one would run against an emptied database mid-test - and
+  // clear what they sent, so each test sees only its own mail. Imported here,
+  // not at the top, for the same env-ordering reason as above.
+  const mailer = await import("../src/services/mailer.js");
+  await mailer.settleMail();
+  mailer.clearSentMail();
+
   // Wipe rather than drop: dropping would take the indexes with it, and the
   // unique constraints are part of what several tests are asserting on.
   const collections = mongoose.connection.collections;

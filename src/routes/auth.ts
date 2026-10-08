@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   changePasswordSchema,
+  googleLoginSchema,
   loginSchema,
   registerSchema,
   updateProfileSchema,
@@ -40,6 +41,21 @@ router.post(
   validate({ body: loginSchema }),
   asyncHandler(async (req, res) => {
     const result = await authService.login(req.body);
+    setAuthCookies(res, result.tokens);
+    res.json({ user: result.user, ...result.tokens });
+  })
+);
+
+router.get("/providers", (_req, res) => {
+  res.json(authService.authProviders());
+});
+
+router.post(
+  "/google",
+  authLimiter,
+  validate({ body: googleLoginSchema }),
+  asyncHandler(async (req, res) => {
+    const result = await authService.loginWithGoogle(req.body.credential);
     setAuthCookies(res, result.tokens);
     res.json({ user: result.user, ...result.tokens });
   })
